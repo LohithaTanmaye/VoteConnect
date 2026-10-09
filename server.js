@@ -8,13 +8,36 @@ const supabase = require("./supabaseClient");
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-app.use(express.json());
-app.use(express.static(__dirname));
+app.use(express.json({ limit: "20kb" }));
+
+// Serve frontend files, but do not expose server-side files.
+app.use((req, res, next) => {
+    const blockedFiles = new Set([
+        "/server.js",
+        "/supabaseClient.js",
+        "/supabase.sql",
+        "/package.json",
+        "/package-lock.json"
+    ]);
+
+    if (blockedFiles.has(req.path)) {
+        return res.sendStatus(404);
+    }
+
+    next();
+});
+
+app.use(express.static(__dirname, {
+    dotfiles: "deny",
+    index: "index.html"
+}));
+
+app.get("/", (req, res) => {
+    res.sendFile(__dirname + "/index.html");
+});
 
 // ==========================================
-// CANDIDATE DATA
-// Used to initialize the candidates table
-// if it is empty.
+// DEFAULT CANDIDATES
 // ==========================================
 
 const defaultCandidates = [
@@ -49,13 +72,13 @@ const defaultCandidates = [
 ];
 
 // ==========================================
-// ADMIN TOKEN HELPERS
+// CREATE ADMIN TOKEN
 // ==========================================
 
 function createAdminToken(username) {
     const payload = Buffer.from(
         JSON.stringify({
-            username,
+            username: username,
             expiresAt: Date.now() + 2 * 60 * 60 * 1000
         })
     ).toString("base64url");
@@ -65,10 +88,22 @@ function createAdminToken(username) {
         .update(payload)
         .digest("base64url");
 
-    return `${payload}.${signature}`;
+return payload + "." + signature;
 }
 
+// ==========================================
+// VERIFY ADMIN TOKEN
+// ==========================================
+
 function requireAdmin(req, res, next) {
+    const secret = process.env.ADMIN_SESSION_SECRET;
+
+    if (!secret) {
+        return res.status(500).json({
+            message: "Admin session is not configured."
+        });
+    }
+
     const authorization = req.headers.authorization || "";
     const [scheme, token] = authorization.split(" ");
 
@@ -89,7 +124,7 @@ function requireAdmin(req, res, next) {
     const [payload, suppliedSignature] = parts;
 
     const expectedSignature = crypto
-        .createHmac("sha256", process.env.ADMIN_SESSION_SECRET)
+        .createHmac("sha256", secret)
         .update(payload)
         .digest();
 
@@ -108,7 +143,10 @@ function requireAdmin(req, res, next) {
 
     if (
         actualSignature.length !== expectedSignature.length ||
-        !crypto.timingSafeEqual(actualSignature, expectedSignature)
+        !crypto.timingSafeEqual(
+            actualSignature,
+            expectedSignature
+        )
     ) {
         return res.status(401).json({
             message: "Invalid admin session."
@@ -130,7 +168,10 @@ function requireAdmin(req, res, next) {
             });
         }
 
-        req.admin = { username: session.username };
+        req.admin = {
+            username: session.username
+        };
+
         next();
     } catch {
         return res.status(401).json({
@@ -152,7 +193,6 @@ app.get("/api/candidates", async (req, res) => {
 
         if (error) throw error;
 
-        // Populate the table if it is currently empty.
         if (data.length === 0) {
             const result = await supabase
                 .from("candidates")
@@ -160,12 +200,14 @@ app.get("/api/candidates", async (req, res) => {
                 .select("id, name, party, symbol, description");
 
             if (result.error) throw result.error;
+
             data = result.data;
         }
 
         res.json(data);
     } catch (error) {
         console.error("Get candidates error:", error.message);
+
         res.status(500).json({
             message: "Unable to load candidates."
         });
@@ -209,13 +251,23 @@ app.post("/api/voters", async (req, res) => {
 
         const numericAge = Number(age);
 
-        if (!Number.isInteger(numericAge) || numericAge < 18) {
+        if (
+            !Number.isInteger(numericAge) ||
+            numericAge < 18 ||
+            numericAge > 120
+        ) {
             return res.status(400).json({
-                message: "Voter must be 18 years or older."
+                message: "Please enter a valid age of 18 or older."
             });
         }
 
         const cleanEmail = email.trim().toLowerCase();
+
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+            return res.status(400).json({
+                message: "Please enter a valid email address."
+            });
+        }
 
         const { data, error } = await supabase
             .from("voters")
@@ -259,6 +311,7 @@ app.post("/api/voters", async (req, res) => {
         });
     } catch (error) {
         console.error("Register voter error:", error.message);
+
         res.status(500).json({
             message: "Unable to register voter."
         });
@@ -289,8 +342,7 @@ app.get("/api/voters/status", async (req, res) => {
 
         if (!data) {
             return res.status(404).json({
-                message:
-                    "No voter registration found with this email."
+                message: "No voter registration found with this email."
             });
         }
 
@@ -301,6 +353,7 @@ app.get("/api/voters/status", async (req, res) => {
         });
     } catch (error) {
         console.error("Voter status error:", error.message);
+
         res.status(500).json({
             message: "Unable to check voter status."
         });
@@ -348,7 +401,7 @@ app.post("/api/admin/login", (req, res) => {
 });
 
 // ==========================================
-// GET ALL VOTERS (ADMIN ONLY)
+// GET ALL VOTERS — ADMIN ONLY
 // ==========================================
 
 app.get("/api/admin/voters", requireAdmin, async (req, res) => {
@@ -362,7 +415,6 @@ app.get("/api/admin/voters", requireAdmin, async (req, res) => {
 
         if (error) throw error;
 
-        // Preserve voterId for existing frontend code.
         res.json(
             data.map(voter => ({
                 ...voter,
@@ -371,6 +423,7 @@ app.get("/api/admin/voters", requireAdmin, async (req, res) => {
         );
     } catch (error) {
         console.error("Get voters error:", error.message);
+
         res.status(500).json({
             message: "Unable to load voters."
         });
@@ -378,98 +431,89 @@ app.get("/api/admin/voters", requireAdmin, async (req, res) => {
 });
 
 // ==========================================
-// VERIFY VOTER (ADMIN ONLY)
+// UPDATE VOTER STATUS — ADMIN ONLY
 // ==========================================
+
+async function updateVoterStatus(req, res, status) {
+    try {
+        const id = Number(req.params.id);
+
+        if (!Number.isSafeInteger(id) || id <= 0) {
+            return res.status(400).json({
+                message: "Invalid voter ID."
+            });
+        }
+
+        const { data, error } = await supabase
+            .from("voters")
+            .update({ status: status })
+            .eq("id", id)
+            .select(
+                "id, name, email, mobile, voter_id, age, gender, status"
+            )
+            .maybeSingle();
+
+        if (error) throw error;
+
+        if (!data) {
+            return res.status(404).json({
+                message: "Voter not found."
+            });
+        }
+
+        res.json({
+message: "Voter " + status.toLowerCase() + " successfully.",
+            voter: {
+                ...data,
+                voterId: data.voter_id
+            }
+        });
+    } catch (error) {
+        console.error("Update voter status error:", error.message);
+
+        res.status(500).json({
+            message: "Unable to update voter status."
+        });
+    }
+}
 
 app.put(
     "/api/admin/voters/:id/verify",
     requireAdmin,
-    async (req, res) => {
-        try {
-            const id = Number(req.params.id);
-
-            if (!Number.isSafeInteger(id) || id <= 0) {
-                return res.status(400).json({
-                    message: "Invalid voter ID."
-                });
-            }
-
-            const { data, error } = await supabase
-                .from("voters")
-                .update({ status: "Verified" })
-                .eq("id", id)
-                .select(
-                    "id, name, email, mobile, voter_id, age, gender, status"
-                )
-                .maybeSingle();
-
-            if (error) throw error;
-
-            if (!data) {
-                return res.status(404).json({
-                    message: "Voter not found."
-                });
-            }
-
-            res.json({
-                message: "Voter verified successfully.",
-                voter: { ...data, voterId: data.voter_id }
-            });
-        } catch (error) {
-            console.error("Verify voter error:", error.message);
-            res.status(500).json({
-                message: "Unable to verify voter."
-            });
-        }
-    }
+    (req, res) => updateVoterStatus(req, res, "Verified")
 );
-
-// ==========================================
-// REJECT VOTER (ADMIN ONLY)
-// ==========================================
 
 app.put(
     "/api/admin/voters/:id/reject",
     requireAdmin,
-    async (req, res) => {
-        try {
-            const id = Number(req.params.id);
-
-            if (!Number.isSafeInteger(id) || id <= 0) {
-                return res.status(400).json({
-                    message: "Invalid voter ID."
-                });
-            }
-
-            const { data, error } = await supabase
-                .from("voters")
-                .update({ status: "Rejected" })
-                .eq("id", id)
-                .select(
-                    "id, name, email, mobile, voter_id, age, gender, status"
-                )
-                .maybeSingle();
-
-            if (error) throw error;
-
-            if (!data) {
-                return res.status(404).json({
-                    message: "Voter not found."
-                });
-            }
-
-            res.json({
-                message: "Voter rejected successfully.",
-                voter: { ...data, voterId: data.voter_id }
-            });
-        } catch (error) {
-            console.error("Reject voter error:", error.message);
-            res.status(500).json({
-                message: "Unable to reject voter."
-            });
-        }
-    }
+    (req, res) => updateVoterStatus(req, res, "Rejected")
 );
+
+// ==========================================
+// UNKNOWN API ROUTES
+// ==========================================
+
+app.use("/api", (req, res) => {
+    res.status(404).json({
+        message: "API endpoint not found."
+    });
+});
+
+// ==========================================
+// ERROR HANDLER
+// ==========================================
+
+app.use((error, req, res, next) => {
+    console.error("Server error:", error.message);
+
+    if (res.headersSent) {
+        return next(error);
+    }
+
+    res.status(500).json({
+        message: "An unexpected server error occurred."
+    });
+});
 
 // ==========================================
 // START SERVER
@@ -479,8 +523,7 @@ if (require.main === module) {
     app.listen(PORT, () => {
         console.log("====================================");
         console.log("       VOTECONNECT SERVER");
-        console.log(`   Running at http://localhost:${PORT}`);
-        console.log("====================================");
+        console.log("   Running at http://localhost:" + PORT);        console.log("====================================");
     });
 }
 
