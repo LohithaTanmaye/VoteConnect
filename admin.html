@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+
+    <meta charset="UTF-8">
+
+    <meta name="viewport"
+          content="width=device-width, initial-scale=1.0">
+
+    <title>Admin Dashboard - VoteConnect</title>
+
+    <link rel="stylesheet" href="style.css">
+
+</head>
+
+<body>
+
+
+    <!-- NAVIGATION -->
+
+    <nav class="navbar">
+
+        <div class="logo">
+            VoteConnect
+        </div>
+
+        <div class="nav-links">
+
+            <a href="index.html">
+                Home
+            </a>
+
+            <a href="candidates.html">
+                Candidates
+            </a>
+
+            <a href="register.html">
+                Register
+            </a>
+
+            <button
+                type="button"
+                class="logout-btn"
+                onclick="adminLogout()">
+
+                Logout
+
+            </button>
+
+        </div>
+
+    </nav>
+
+
+    <!-- PAGE HEADER -->
+
+    <section class="page-header">
+
+        <p class="section-label">
+            ADMINISTRATION
+        </p>
+
+        <h1>
+            Voter Verification Dashboard
+        </h1>
+
+        <p>
+            Review submitted voter registrations and update their status.
+        </p>
+
+    </section>
+
+
+    <!-- ADMIN TABLE -->
+
+    <section class="section admin-section">
+
+        <div class="admin-header">
+
+            <div>
+
+                <h2>
+                    Registered Voters
+                </h2>
+
+                <p>
+                    Verify or reject voter registrations.
+                </p>
+
+            </div>
+
+        </div>
+
+
+        <div
+            id="adminMessage"
+            class="admin-message">
+        </div>
+
+
+        <div class="table-container">
+
+            <table>
+
+                <thead>
+
+                    <tr>
+
+                        <th>ID</th>
+
+                        <th>Name</th>
+
+                        <th>Email</th>
+
+                        <th>Mobile</th>
+
+                        <th>Voter ID</th>
+
+                        <th>Age</th>
+
+                        <th>Gender</th>
+
+                        <th>Status</th>
+
+                        <th>Action</th>
+
+                    </tr>
+
+                </thead>
+
+
+                <tbody id="voterTableBody">
+
+                    <tr>
+
+                        <td
+                            colspan="9"
+                            class="loading">
+
+                            Loading voter registrations...
+
+                        </td>
+
+                    </tr>
+
+                </tbody>
+
+            </table>
+
+        </div>
+
+    </section>
+
+
+    <!-- FOOTER -->
+
+    <footer class="footer">
+
+        <p>
+            © 2026 VoteConnect. Academic Project.
+        </p>
+
+    </footer>
+
+
+    <script src="script.js"></script>
+
+</body>
+
+</html>

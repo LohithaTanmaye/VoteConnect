@@ -1,0 +1,9 @@
+/*
+    VoteConnect Admin Module
+
+    The admin dashboard functionality is handled
+    by script.js.
+
+    This file is kept in the project folder for
+    future expansion of the admin module.
+*/
