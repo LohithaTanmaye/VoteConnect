@@ -29,7 +29,12 @@ app.use((req, res, next) => {
 
 app.use(express.static(__dirname, {
     dotfiles: "deny",
-    index: "index.html"
+    index: "index.html",
+    setHeaders: (res, path) => {
+        if (path.endsWith(".css")) {
+            res.setHeader("Content-Type", "text/css");
+        }
+    }
 }));
 
 app.get("/", (req, res) => {
@@ -78,6 +83,7 @@ const defaultCandidates = [
 function createAdminToken(username) {
     const payload = Buffer.from(
         JSON.stringify({
+
             username: username,
             expiresAt: Date.now() + 2 * 60 * 60 * 1000
         })
