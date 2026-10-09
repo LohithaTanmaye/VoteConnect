@@ -218,13 +218,28 @@ app.get("/api/candidates", requireSupabase, async (req, res) => {
 // REGISTER VOTER
 // ========================================
 
-app.post("/api/register", requireSupabase, async (req, res) => {
+async function registerVoter(req, res) {
     try {
-        const { name, email, voterId } = req.body || {};
+        const {
+            name,
+            email,
+            mobile,
+            voterId,
+            age,
+            gender
+        } = req.body || {};
 
-        if (!name || !email || !voterId) {
+        if (!name || !email || !mobile || !voterId || !gender) {
             return res.status(400).json({
-                error: "Name, email and voter ID are required."
+                error: "Name, email, mobile, voter ID and gender are required."
+            });
+        }
+
+        const parsedAge = Number(age);
+
+        if (!Number.isInteger(parsedAge) || parsedAge < 18) {
+            return res.status(400).json({
+                error: "Voter must be 18 years or older."
             });
         }
 
@@ -233,11 +248,22 @@ app.post("/api/register", requireSupabase, async (req, res) => {
             .insert([{
                 name,
                 email,
-                voter_id: voterId
+                mobile,
+                voter_id: voterId,
+                age: parsedAge,
+                gender,
+                status: "Pending"
             }])
             .select();
 
-        if (error) throw error;
+        if (error) {
+            if (error.code === "23505") {
+                return res.status(409).json({
+                    error: "A voter with this email or voter ID already exists."
+                });
+            }
+            throw error;
+        }
 
         res.status(201).json({
             success: true,
@@ -247,6 +273,46 @@ app.post("/api/register", requireSupabase, async (req, res) => {
         console.error("Voter registration failed:", error.message);
         res.status(500).json({
             error: "Unable to register voter."
+        });
+    }
+}
+
+app.post("/api/register", requireSupabase, registerVoter);
+app.post("/api/voters", requireSupabase, registerVoter);
+
+// ========================================
+// CHECK VOTER STATUS
+// ========================================
+
+app.get("/api/voters/status", requireSupabase, async (req, res) => {
+    try {
+        const email = String(req.query.email || "").trim();
+
+        if (!email) {
+            return res.status(400).json({
+                error: "Email is required."
+            });
+        }
+
+        const { data, error } = await supabase
+            .from("voters")
+            .select("*")
+            .eq("email", email)
+            .maybeSingle();
+
+        if (error) throw error;
+
+        if (!data) {
+            return res.status(404).json({
+                error: "No registration found for this email."
+            });
+        }
+
+        res.json(data);
+    } catch (error) {
+        console.error("Get voter status failed:", error.message);
+        res.status(500).json({
+            error: "Unable to check registration status."
         });
     }
 });
@@ -274,6 +340,56 @@ app.get(
                 error: "Unable to load voters."
             });
         }
+    }
+);
+
+// ========================================
+// ADMIN: VERIFY/REJECT VOTER
+// ========================================
+
+async function updateVoterStatus(req, res, status) {
+    try {
+        const { data, error } = await supabase
+            .from("voters")
+            .update({ status })
+            .eq("id", req.params.id)
+            .select();
+
+        if (error) throw error;
+
+        if (!data || data.length === 0) {
+            return res.status(404).json({
+                error: "Voter registration not found."
+            });
+        }
+
+        res.json({
+            success: true,
+            voter: data[0]
+        });
+    } catch (error) {
+        console.error(`Update voter status failed (${status}):`, error.message);
+        res.status(500).json({
+            error: `Unable to ${status.toLowerCase()} voter.`
+        });
+    }
+}
+
+app.put(
+    "/api/admin/voters/:id/verify",
+    requireAdmin,
+    requireSupabase,
+    async (req, res) => {
+        await updateVoterStatus(req, res, "Verified");
+    }
+);
+
+app.put(
+    "/api/admin/voters/:id/reject",
+    requireAdmin,
+    requireSupabase,
+    async (req, res) => {
+        await updateVoterStatus(req, res, "Rejected");
     }
 );
 
@@ -351,6 +467,10 @@ app.delete(
 // ========================================
 
 app.use((req, res) => {
+    if (req.path.startsWith("/api/")) {
+        return res.status(404).json({ error: "Not found" });
+    }
+
     res.status(404).send("Not found");
 });
 

@@ -60,6 +60,20 @@ async function loadCandidates() {
 }
 
 
+async function parseJsonResponse(response) {
+    const text = await response.text();
+
+    if (!text) {
+        return {};
+    }
+
+    try {
+        return JSON.parse(text);
+    } catch {
+        return { message: text };
+    }
+}
+
 /* ==========================================
    VOTER REGISTRATION
    ========================================== */
@@ -110,10 +124,10 @@ if (voterForm) {
                 })
             });
 
-            const data = await response.json();
+            const data = await parseJsonResponse(response);
 
             if (!response.ok) {
-                throw new Error(data.message || "Registration failed.");
+                throw new Error(data.message || data.error || "Registration failed.");
             }
 
             message.textContent =
@@ -152,10 +166,10 @@ if (statusForm) {
                 `/api/voters/status?email=${encodeURIComponent(email)}`
             );
 
-            const data = await response.json();
+            const data = await parseJsonResponse(response);
 
             if (!response.ok) {
-                throw new Error(data.message || "Unable to check status.");
+                throw new Error(data.message || data.error || "Unable to check status.");
             }
 
             result.replaceChildren();
@@ -221,10 +235,10 @@ if (adminLoginForm) {
                 })
             });
 
-            const data = await response.json();
+            const data = await parseJsonResponse(response);
 
             if (!response.ok) {
-                throw new Error(data.message || "Login failed.");
+                throw new Error(data.message || data.error || "Login failed.");
             }
 
             if (!data.token) {
@@ -291,11 +305,11 @@ async function loadVoters() {
             return;
         }
 
-        const voters = await response.json();
+        const voters = await parseJsonResponse(response);
 
         if (!response.ok) {
             throw new Error(
-                voters.message || "Failed to load voter registrations."
+                voters.message || voters.error || "Failed to load voter registrations."
             );
         }
 
@@ -403,7 +417,7 @@ async function verifyVoter(id) {
             }
         );
 
-        const data = await response.json();
+        const data = await parseJsonResponse(response);
 
         if (response.status === 401 || response.status === 403) {
             redirectToAdminLogin();
@@ -411,7 +425,7 @@ async function verifyVoter(id) {
         }
 
         if (!response.ok) {
-            throw new Error(data.message || "Verification failed.");
+            throw new Error(data.message || data.error || "Verification failed.");
         }
 
         if (message) {
@@ -455,7 +469,7 @@ async function rejectVoter(id) {
             }
         );
 
-        const data = await response.json();
+        const data = await parseJsonResponse(response);
 
         if (response.status === 401 || response.status === 403) {
             redirectToAdminLogin();
@@ -463,7 +477,7 @@ async function rejectVoter(id) {
         }
 
         if (!response.ok) {
-            throw new Error(data.message || "Rejection failed.");
+            throw new Error(data.message || data.error || "Rejection failed.");
         }
 
         if (message) {
