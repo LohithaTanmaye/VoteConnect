@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+
+    <meta charset="UTF-8">
+
+    <meta name="viewport"
+          content="width=device-width, initial-scale=1.0">
+
+    <title>Admin Login - VoteConnect</title>
+
+    <link rel="stylesheet" href="style.css">
+
+</head>
+
+<body>
+
+
+    <!-- NAVIGATION -->
+
+    <nav class="navbar">
+
+        <div class="logo">
+            VoteConnect
+        </div>
+
+        <div class="nav-links">
+
+            <a href="index.html">
+                Home
+            </a>
+
+            <a href="candidates.html">
+                Candidates
+            </a>
+
+            <a href="register.html">
+                Register
+            </a>
+
+            <a href="adminlogin.html"
+               class="active">
+                Admin
+            </a>
+
+        </div>
+
+    </nav>
+
+
+    <!-- PAGE HEADER -->
+
+    <section class="page-header">
+
+        <p class="section-label">
+            ADMINISTRATION
+        </p>
+
+        <h1>
+            Admin Login
+        </h1>
+
+        <p>
+            Secure access to voter verification.
+        </p>
+
+    </section>
+
+
+    <!-- LOGIN -->
+
+    <section class="form-section">
+
+        <div class="form-card">
+
+            <h2>
+                Administrator Login
+            </h2>
+
+            <p>
+                Login to review and verify voter registrations.
+            </p>
+
+
+            <form id="adminLoginForm">
+
+
+                <div class="form-group">
+
+                    <label for="adminUsername">
+                        Username
+                    </label>
+
+                    <input
+                        type="text"
+                        id="adminUsername"
+                        placeholder="Enter admin username"
+                        required
+                    >
+
+                </div>
+
+
+                <div class="form-group">
+
+                    <label for="adminPassword">
+                        Password
+                    </label>
+
+                    <input
+                        type="password"
+                        id="adminPassword"
+                        placeholder="Enter admin password"
+                        required
+                    >
+
+                </div>
+
+
+                <button
+                    type="submit"
+                    class="btn btn-primary">
+
+                    Login
+
+                </button>
+
+
+                <div
+                    id="loginMessage"
+                    class="admin-message">
+                </div>
+
+            </form>
+
+        </div>
+
+    </section>
+
+
+    <!-- FOOTER -->
+
+    <footer class="footer">
+
+        <p>
+            © 2026 VoteConnect. Academic Project.
+        </p>
+
+    </footer>
+
+
+    <script src="script.js"></script>
+
+</body>
+
+</html>

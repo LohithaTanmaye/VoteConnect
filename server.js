@@ -1,23 +1,46 @@
 
+const express = require("express");
+const path = require("path");
+const crypto = require("crypto");
 require("dotenv").config();
 
-const express = require("express");
-const crypto = require("crypto");
-const supabase = require("./supabaseClient");
+const { createClient } = require("@supabase/supabase-js");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// ========================================
+// SUPABASE CONFIGURATION
+// ========================================
+
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+const supabase =
+    supabaseUrl && supabaseKey
+        ? createClient(supabaseUrl, supabaseKey)
+        : null;
+
+// ========================================
+// MIDDLEWARE
+// ========================================
+
 app.use(express.json({ limit: "20kb" }));
 
-// Serve frontend files, but do not expose server-side files.
+// ========================================
+// STATIC FILES
+// ========================================
+
+// Serve frontend files from the project directory.
+// Do not expose server-side configuration files.
 app.use((req, res, next) => {
     const blockedFiles = new Set([
         "/server.js",
         "/supabaseClient.js",
         "/supabase.sql",
         "/package.json",
-        "/package-lock.json"
+        "/package-lock.json",
+        "/.env"
     ]);
 
     if (blockedFiles.has(req.path)) {
@@ -27,487 +50,313 @@ app.use((req, res, next) => {
     next();
 });
 
-app.use(express.static(__dirname, {
+app.use(express.static(path.join(__dirname, "public"), {
     dotfiles: "deny",
-    index: "index.html",
-    setHeaders: (res, path) => {
-        if (path.endsWith(".css")) {
-            res.setHeader("Content-Type", "text/css");
-        }
-    }
+    index: false
 }));
 
+// ========================================
+// FRONTEND ROUTES
+// ========================================
+
 app.get("/", (req, res) => {
-    res.sendFile(__dirname + "/index.html");
+    res.sendFile(path.join(__dirname, "index.html"));
 });
 
-// ==========================================
-// DEFAULT CANDIDATES
-// ==========================================
+// ========================================
+// ADMIN AUTHENTICATION
+// ========================================
 
-const defaultCandidates = [
-    {
-        name: "Arjun Kumar",
-        party: "Progressive Alliance",
-        symbol: "🌳",
-        description:
-            "Focused on education, employment and youth development."
-    },
-    {
-        name: "Priya Sharma",
-        party: "People's Front",
-        symbol: "🌸",
-        description:
-            "Focused on women's empowerment, healthcare and social welfare."
-    },
-    {
-        name: "Rahul Mehta",
-        party: "National Development Party",
-        symbol: "⭐",
-        description:
-            "Focused on infrastructure, technology and economic development."
-    },
-    {
-        name: "Sneha Rao",
-        party: "United Citizens Party",
-        symbol: "🕊️",
-        description:
-            "Focused on environmental protection, equality and transparency."
-    }
-];
-
-// ==========================================
-// CREATE ADMIN TOKEN
-// ==========================================
+const adminSessions = new Map();
 
 function createAdminToken(username) {
-    const payload = Buffer.from(
-        JSON.stringify({
-
-            username: username,
-            expiresAt: Date.now() + 2 * 60 * 60 * 1000
-        })
-    ).toString("base64url");
+    const expiresAt = Date.now() + 60 * 60 * 1000;
+    const payload = `${username}:${expiresAt}`;
 
     const signature = crypto
-        .createHmac("sha256", process.env.ADMIN_SESSION_SECRET)
+        .createHmac(
+            "sha256",
+            process.env.ADMIN_SESSION_SECRET || ""
+        )
         .update(payload)
-        .digest("base64url");
+        .digest("hex");
 
-return payload + "." + signature;
+    return `${Buffer.from(payload).toString("base64url")}.${signature}`;
 }
 
-// ==========================================
-// VERIFY ADMIN TOKEN
-// ==========================================
-
-function requireAdmin(req, res, next) {
-    const secret = process.env.ADMIN_SESSION_SECRET;
-
-    if (!secret) {
-        return res.status(500).json({
-            message: "Admin session is not configured."
-        });
-    }
-
-    const authorization = req.headers.authorization || "";
-    const [scheme, token] = authorization.split(" ");
-
-    if (scheme !== "Bearer" || !token) {
-        return res.status(401).json({
-            message: "Admin authentication required."
-        });
-    }
+function verifyAdminToken(token) {
+    if (!token) return false;
 
     const parts = token.split(".");
-
-    if (parts.length !== 2) {
-        return res.status(401).json({
-            message: "Invalid admin session."
-        });
-    }
-
-    const [payload, suppliedSignature] = parts;
-
-    const expectedSignature = crypto
-        .createHmac("sha256", secret)
-        .update(payload)
-        .digest();
-
-    let actualSignature;
+    if (parts.length !== 2) return false;
 
     try {
-        actualSignature = Buffer.from(
-            suppliedSignature,
-            "base64url"
-        );
+        const payload = Buffer.from(parts[0], "base64url").toString();
+        const separator = payload.lastIndexOf(":");
+
+        if (separator === -1) return false;
+
+        const username = payload.slice(0, separator);
+        const expiresAt = Number(payload.slice(separator + 1));
+
+        if (!username || !Number.isFinite(expiresAt)) return false;
+        if (Date.now() > expiresAt) return false;
+
+        const expected = crypto
+            .createHmac(
+                "sha256",
+                process.env.ADMIN_SESSION_SECRET || ""
+            )
+            .update(payload)
+            .digest();
+
+        const supplied = Buffer.from(parts[1], "hex");
+
+        return supplied.length === expected.length &&
+            crypto.timingSafeEqual(supplied, expected);
     } catch {
-        return res.status(401).json({
-            message: "Invalid admin session."
-        });
-    }
-
-    if (
-        actualSignature.length !== expectedSignature.length ||
-        !crypto.timingSafeEqual(
-            actualSignature,
-            expectedSignature
-        )
-    ) {
-        return res.status(401).json({
-            message: "Invalid admin session."
-        });
-    }
-
-    try {
-        const session = JSON.parse(
-            Buffer.from(payload, "base64url").toString("utf8")
-        );
-
-        if (
-            session.username !== process.env.ADMIN_USERNAME ||
-            typeof session.expiresAt !== "number" ||
-            session.expiresAt <= Date.now()
-        ) {
-            return res.status(401).json({
-                message: "Admin session expired. Please log in again."
-            });
-        }
-
-        req.admin = {
-            username: session.username
-        };
-
-        next();
-    } catch {
-        return res.status(401).json({
-            message: "Invalid admin session."
-        });
+        return false;
     }
 }
 
-// ==========================================
-// GET CANDIDATES
-// ==========================================
+function requireAdmin(req, res, next) {
+    const authHeader = req.headers.authorization || "";
+    const token = authHeader.startsWith("Bearer ")
+        ? authHeader.slice(7)
+        : "";
 
-app.get("/api/candidates", async (req, res) => {
+    if (!verifyAdminToken(token)) {
+        return res.status(401).json({
+            error: "Unauthorized. Please log in again."
+        });
+    }
+
+    next();
+}
+
+// ========================================
+// ADMIN LOGIN
+// ========================================
+
+app.post("/api/admin/login", (req, res) => {
+    const { username, password } = req.body || {};
+
+    const configuredUsername = process.env.ADMIN_USERNAME;
+    const configuredPassword = process.env.ADMIN_PASSWORD;
+    const sessionSecret = process.env.ADMIN_SESSION_SECRET;
+
+    if (!configuredUsername || !configuredPassword || !sessionSecret) {
+        return res.status(500).json({
+            error: "Admin login is not configured."
+        });
+    }
+
+    const usernameBuffer = Buffer.from(String(username || ""));
+    const expectedUsernameBuffer = Buffer.from(configuredUsername);
+    const passwordBuffer = Buffer.from(String(password || ""));
+    const expectedPasswordBuffer = Buffer.from(configuredPassword);
+
+    const usernameMatches =
+        usernameBuffer.length === expectedUsernameBuffer.length &&
+        crypto.timingSafeEqual(usernameBuffer, expectedUsernameBuffer);
+
+    const passwordMatches =
+        passwordBuffer.length === expectedPasswordBuffer.length &&
+        crypto.timingSafeEqual(passwordBuffer, expectedPasswordBuffer);
+
+    if (!usernameMatches || !passwordMatches) {
+        return res.status(401).json({
+            error: "Invalid username or password."
+        });
+    }
+
+    const token = createAdminToken(configuredUsername);
+
+    return res.json({
+        success: true,
+        token,
+        expiresIn: 3600
+    });
+});
+
+// ========================================
+// SUPABASE CHECK
+// ========================================
+
+function requireSupabase(req, res, next) {
+    if (!supabase) {
+        return res.status(500).json({
+            error: "Database is not configured on the server."
+        });
+    }
+
+    next();
+}
+
+// ========================================
+// GET CANDIDATES
+// ========================================
+
+app.get("/api/candidates", requireSupabase, async (req, res) => {
     try {
-        let { data, error } = await supabase
+        const { data, error } = await supabase
             .from("candidates")
-            .select("id, name, party, symbol, description")
-            .order("id", { ascending: true });
+            .select("*");
 
         if (error) throw error;
-
-        if (data.length === 0) {
-            const result = await supabase
-                .from("candidates")
-                .insert(defaultCandidates)
-                .select("id, name, party, symbol, description");
-
-            if (result.error) throw result.error;
-
-            data = result.data;
-        }
 
         res.json(data);
     } catch (error) {
-        console.error("Get candidates error:", error.message);
-
+        console.error("Get candidates failed:", error.message);
         res.status(500).json({
-            message: "Unable to load candidates."
+            error: "Unable to load candidates."
         });
     }
 });
 
-// ==========================================
+// ========================================
 // REGISTER VOTER
-// ==========================================
+// ========================================
 
-app.post("/api/voters", async (req, res) => {
+app.post("/api/register", requireSupabase, async (req, res) => {
     try {
-        const {
-            name,
-            email,
-            mobile,
-            voterId,
-            age,
-            gender
-        } = req.body;
+        const { name, email, voterId } = req.body || {};
 
-        if (
-            typeof name !== "string" ||
-            typeof email !== "string" ||
-            typeof mobile !== "string" ||
-            typeof voterId !== "string" ||
-            typeof gender !== "string" ||
-            !name.trim() ||
-            !email.trim() ||
-            !mobile.trim() ||
-            !voterId.trim() ||
-            !gender.trim() ||
-            age === undefined ||
-            age === null ||
-            age === ""
-        ) {
+        if (!name || !email || !voterId) {
             return res.status(400).json({
-                message: "Please fill in all required fields."
-            });
-        }
-
-        const numericAge = Number(age);
-
-        if (
-            !Number.isInteger(numericAge) ||
-            numericAge < 18 ||
-            numericAge > 120
-        ) {
-            return res.status(400).json({
-                message: "Please enter a valid age of 18 or older."
-            });
-        }
-
-        const cleanEmail = email.trim().toLowerCase();
-
-        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
-            return res.status(400).json({
-                message: "Please enter a valid email address."
+                error: "Name, email and voter ID are required."
             });
         }
 
         const { data, error } = await supabase
             .from("voters")
-            .insert({
-                name: name.trim(),
-                email: cleanEmail,
-                mobile: mobile.trim(),
-                voter_id: voterId.trim(),
-                age: numericAge,
-                gender: gender.trim(),
-                status: "Pending"
-            })
-            .select(
-                "id, name, email, mobile, voter_id, age, gender, status"
-            )
-            .single();
+            .insert([{
+                name,
+                email,
+                voter_id: voterId
+            }])
+            .select();
 
-        if (error) {
-            if (error.code === "23505") {
-                return res.status(409).json({
-                    message:
-                        "This email or voter ID is already registered."
+        if (error) throw error;
+
+        res.status(201).json({
+            success: true,
+            voter: data[0]
+        });
+    } catch (error) {
+        console.error("Voter registration failed:", error.message);
+        res.status(500).json({
+            error: "Unable to register voter."
+        });
+    }
+});
+
+// ========================================
+// ADMIN: VIEW VOTERS
+// ========================================
+
+app.get(
+    "/api/admin/voters",
+    requireAdmin,
+    requireSupabase,
+    async (req, res) => {
+        try {
+            const { data, error } = await supabase
+                .from("voters")
+                .select("*");
+
+            if (error) throw error;
+
+            res.json(data);
+        } catch (error) {
+            console.error("Get voters failed:", error.message);
+            res.status(500).json({
+                error: "Unable to load voters."
+            });
+        }
+    }
+);
+
+// ========================================
+// ADMIN: ADD CANDIDATE
+// ========================================
+
+app.post(
+    "/api/admin/candidates",
+    requireAdmin,
+    requireSupabase,
+    async (req, res) => {
+        try {
+            const { name, party, description } = req.body || {};
+
+            if (!name) {
+                return res.status(400).json({
+                    error: "Candidate name is required."
                 });
             }
 
-            throw error;
-        }
+            const { data, error } = await supabase
+                .from("candidates")
+                .insert([{
+                    name,
+                    party: party || null,
+                    description: description || null
+                }])
+                .select();
 
-        res.status(201).json({
-            message: "Registration successful.",
-            voter: {
-                id: data.id,
-                name: data.name,
-                email: data.email,
-                mobile: data.mobile,
-                voterId: data.voter_id,
-                age: data.age,
-                gender: data.gender,
-                status: data.status
-            }
-        });
-    } catch (error) {
-        console.error("Register voter error:", error.message);
+            if (error) throw error;
 
-        res.status(500).json({
-            message: "Unable to register voter."
-        });
-    }
-});
-
-// ==========================================
-// CHECK VOTER STATUS
-// ==========================================
-
-app.get("/api/voters/status", async (req, res) => {
-    try {
-        const email = req.query.email;
-
-        if (typeof email !== "string" || !email.trim()) {
-            return res.status(400).json({
-                message: "Email is required."
+            res.status(201).json({
+                success: true,
+                candidate: data[0]
+            });
+        } catch (error) {
+            console.error("Add candidate failed:", error.message);
+            res.status(500).json({
+                error: "Unable to add candidate."
             });
         }
-
-        const { data, error } = await supabase
-            .from("voters")
-            .select("name, voter_id, status")
-            .eq("email", email.trim().toLowerCase())
-            .maybeSingle();
-
-        if (error) throw error;
-
-        if (!data) {
-            return res.status(404).json({
-                message: "No voter registration found with this email."
-            });
-        }
-
-        res.json({
-            name: data.name,
-            voter_id: data.voter_id,
-            status: data.status
-        });
-    } catch (error) {
-        console.error("Voter status error:", error.message);
-
-        res.status(500).json({
-            message: "Unable to check voter status."
-        });
     }
-});
-
-// ==========================================
-// ADMIN LOGIN
-// ==========================================
-
-app.post("/api/admin/login", (req, res) => {
-    const { username, password } = req.body;
-
-    if (
-        !process.env.ADMIN_USERNAME ||
-        !process.env.ADMIN_PASSWORD ||
-        !process.env.ADMIN_SESSION_SECRET
-    ) {
-        return res.status(500).json({
-            success: false,
-            message: "Admin credentials are not configured."
-        });
-    }
-
-    const validUsername =
-        typeof username === "string" &&
-        username === process.env.ADMIN_USERNAME;
-
-    const validPassword =
-        typeof password === "string" &&
-        password === process.env.ADMIN_PASSWORD;
-
-    if (!validUsername || !validPassword) {
-        return res.status(401).json({
-            success: false,
-            message: "Invalid username or password."
-        });
-    }
-
-    res.json({
-        success: true,
-        message: "Admin login successful.",
-        token: createAdminToken(username)
-    });
-});
-
-// ==========================================
-// GET ALL VOTERS — ADMIN ONLY
-// ==========================================
-
-app.get("/api/admin/voters", requireAdmin, async (req, res) => {
-    try {
-        const { data, error } = await supabase
-            .from("voters")
-            .select(
-                "id, name, email, mobile, voter_id, age, gender, status, created_at"
-            )
-            .order("created_at", { ascending: false });
-
-        if (error) throw error;
-
-        res.json(
-            data.map(voter => ({
-                ...voter,
-                voterId: voter.voter_id
-            }))
-        );
-    } catch (error) {
-        console.error("Get voters error:", error.message);
-
-        res.status(500).json({
-            message: "Unable to load voters."
-        });
-    }
-});
-
-// ==========================================
-// UPDATE VOTER STATUS — ADMIN ONLY
-// ==========================================
-
-async function updateVoterStatus(req, res, status) {
-    try {
-        const id = Number(req.params.id);
-
-        if (!Number.isSafeInteger(id) || id <= 0) {
-            return res.status(400).json({
-                message: "Invalid voter ID."
-            });
-        }
-
-        const { data, error } = await supabase
-            .from("voters")
-            .update({ status: status })
-            .eq("id", id)
-            .select(
-                "id, name, email, mobile, voter_id, age, gender, status"
-            )
-            .maybeSingle();
-
-        if (error) throw error;
-
-        if (!data) {
-            return res.status(404).json({
-                message: "Voter not found."
-            });
-        }
-
-        res.json({
-message: "Voter " + status.toLowerCase() + " successfully.",
-            voter: {
-                ...data,
-                voterId: data.voter_id
-            }
-        });
-    } catch (error) {
-        console.error("Update voter status error:", error.message);
-
-        res.status(500).json({
-            message: "Unable to update voter status."
-        });
-    }
-}
-
-app.put(
-    "/api/admin/voters/:id/verify",
-    requireAdmin,
-    (req, res) => updateVoterStatus(req, res, "Verified")
 );
 
-app.put(
-    "/api/admin/voters/:id/reject",
+// ========================================
+// ADMIN: DELETE CANDIDATE
+// ========================================
+
+app.delete(
+    "/api/admin/candidates/:id",
     requireAdmin,
-    (req, res) => updateVoterStatus(req, res, "Rejected")
+    requireSupabase,
+    async (req, res) => {
+        try {
+            const { error } = await supabase
+                .from("candidates")
+                .delete()
+                .eq("id", req.params.id);
+
+            if (error) throw error;
+
+            res.json({ success: true });
+        } catch (error) {
+            console.error("Delete candidate failed:", error.message);
+            res.status(500).json({
+                error: "Unable to delete candidate."
+            });
+        }
+    }
 );
 
-// ==========================================
-// UNKNOWN API ROUTES
-// ==========================================
+// ========================================
+// NOT FOUND
+// ========================================
 
-app.use("/api", (req, res) => {
-    res.status(404).json({
-        message: "API endpoint not found."
-    });
+app.use((req, res) => {
+    res.status(404).send("Not found");
 });
 
-// ==========================================
+// ========================================
 // ERROR HANDLER
-// ==========================================
+// ========================================
 
 app.use((error, req, res, next) => {
     console.error("Server error:", error.message);
@@ -517,19 +366,17 @@ app.use((error, req, res, next) => {
     }
 
     res.status(500).json({
-        message: "An unexpected server error occurred."
+        error: "Internal server error."
     });
 });
 
-// ==========================================
+// ========================================
 // START SERVER
-// ==========================================
+// ========================================
 
 if (require.main === module) {
     app.listen(PORT, () => {
-        console.log("====================================");
-        console.log("       VOTECONNECT SERVER");
-        console.log("   Running at http://localhost:" + PORT);        console.log("====================================");
+        console.log(`VoteConnect running at http://localhost:${PORT}`);
     });
 }
 
