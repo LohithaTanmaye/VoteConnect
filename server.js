@@ -296,7 +296,7 @@ app.get("/api/voters/status", requireSupabase, async (req, res) => {
 
         const { data, error } = await supabase
             .from("voters")
-            .select("*")
+            .select("status")
             .eq("email", email)
             .maybeSingle();
 
@@ -308,7 +308,7 @@ app.get("/api/voters/status", requireSupabase, async (req, res) => {
             });
         }
 
-        res.json(data);
+        res.json({ status: data.status });
     } catch (error) {
         console.error("Get voter status failed:", error.message);
         res.status(500).json({

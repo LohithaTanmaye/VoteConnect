@@ -177,11 +177,7 @@ if (statusForm) {
             const wrapper = document.createElement("div");
             wrapper.className = "status-result";
 
-            const details = [
-                ["Name:", data.name],
-                ["Voter ID:", data.voter_id || data.voterId],
-                ["Status:", data.status]
-            ];
+            const details = [["Status:", data.status]];
 
             details.forEach(([label, value]) => {
                 const paragraph = document.createElement("p");
